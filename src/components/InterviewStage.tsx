@@ -53,6 +53,7 @@ export function InterviewStage({
     SessionState.INACTIVE,
   );
   const [voiceActive, setVoiceActive] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const [isStreamReady, setIsStreamReady] = useState(false);
   const [isAvatarTalking, setIsAvatarTalking] = useState(false);
   const [isUserTalking, setIsUserTalking] = useState(false);
@@ -145,6 +146,15 @@ export function InterviewStage({
       setVoiceActive(s === VoiceChatState.ACTIVE);
     });
 
+    session.voiceChat.on(VoiceChatEvent.MUTED, () => {
+      log("VOICE_CHAT_MUTED");
+      setIsMuted(true);
+    });
+    session.voiceChat.on(VoiceChatEvent.UNMUTED, () => {
+      log("VOICE_CHAT_UNMUTED");
+      setIsMuted(false);
+    });
+
     session.on(AgentEventsEnum.USER_SPEAK_STARTED, () => {
       log("USER_SPEAK_STARTED");
       setIsUserTalking(true);
@@ -210,6 +220,14 @@ export function InterviewStage({
         log("voiceChat.start() …");
         await session.voiceChat.start();
         log("voiceChat.start() ok — mic permission granted");
+        // Force unmute in case the SDK starts in a muted state (some
+        // versions do for PTT mode, expecting the PTT button to unmute).
+        try {
+          await session.voiceChat.unmute();
+          log("voiceChat.unmute() ok");
+        } catch (err) {
+          log("voiceChat.unmute() error (continuing anyway)", err);
+        }
       } catch (err) {
         const m = err instanceof Error ? err.message : String(err);
         log("startup error", err);
@@ -339,6 +357,22 @@ export function InterviewStage({
   const handleInterrupt = useCallback(() => {
     sessionRef.current?.interrupt();
   }, []);
+
+  const handleToggleMute = useCallback(async () => {
+    const session = sessionRef.current;
+    if (!session) return;
+    try {
+      if (isMuted) {
+        await session.voiceChat.unmute();
+        log("manual unmute");
+      } else {
+        await session.voiceChat.mute();
+        log("manual mute");
+      }
+    } catch (err) {
+      log("mute toggle error", err);
+    }
+  }, [isMuted]);
 
   const handleEnd = useCallback(async () => {
     const session = sessionRef.current;
@@ -477,6 +511,11 @@ export function InterviewStage({
             value={voiceActive ? "ACTIVE" : "off"}
             ok={voiceActive}
           />
+          <Crumb
+            label="mic"
+            value={isMuted ? "MUTED" : "open"}
+            ok={!isMuted && voiceActive}
+          />
           {isPTT && (
             <Crumb
               label="pushing"
@@ -507,6 +546,17 @@ export function InterviewStage({
         />
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleToggleMute}
+            disabled={!voiceActive}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+              isMuted
+                ? "border-red-500/40 text-red-300 bg-red-500/10 hover:bg-red-500/20"
+                : "border-white/10 hover:bg-white/5"
+            }`}
+          >
+            {isMuted ? "Unmute mic" : "Mute mic"}
+          </button>
           <button
             onClick={handleInterrupt}
             className="px-3 py-1.5 text-xs rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
