@@ -281,17 +281,21 @@ export function InterviewStage({
     if (!session) return;
     log("PTT start");
     setIsPushing(true);
-    // Start audio capture FIRST — no await, so capture begins immediately.
-    // The listening pose is fire-and-forget so it can't delay capture.
+    // Start audio capture FIRST (Promise) — no await, capture begins immediately.
     session.voiceChat
       .startPushToTalk()
       .then(() => log("PTT capturing audio"))
-      .catch((err) => {
+      .catch((err: unknown) => {
         log("PTT start error", err);
         setErrorMsg(err instanceof Error ? err.message : String(err));
         setIsPushing(false);
       });
-    session.startListening().catch((err) => log("startListening error", err));
+    // startListening is SYNC (returns event_id string), so wrap in try/catch
+    try {
+      session.startListening();
+    } catch (err) {
+      log("startListening error", err);
+    }
   }, []);
 
   const handlePushStop = useCallback(() => {
@@ -301,8 +305,12 @@ export function InterviewStage({
     setIsPushing(false);
     session.voiceChat
       .stopPushToTalk()
-      .catch((err) => log("stopPushToTalk error", err));
-    session.stopListening().catch((err) => log("stopListening error", err));
+      .catch((err: unknown) => log("stopPushToTalk error", err));
+    try {
+      session.stopListening();
+    } catch (err) {
+      log("stopListening error", err);
+    }
   }, []);
 
   // Keep refs to latest PTT handlers so global listeners stay current
