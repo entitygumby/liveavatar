@@ -73,7 +73,17 @@ export function SetupForm({
   const [voiceId, setVoiceId] = useState<string>("");
   const [interactivityType, setInteractivityType] = useState<
     "PUSH_TO_TALK" | "VOICE"
-  >("PUSH_TO_TALK");
+  >(() => {
+    // Allow URL override: /?mode=voice or /?mode=ptt
+    if (typeof window !== "undefined") {
+      const m = new URLSearchParams(window.location.search)
+        .get("mode")
+        ?.toLowerCase();
+      if (m === "voice" || m === "vad") return "VOICE";
+      if (m === "ptt" || m === "push") return "PUSH_TO_TALK";
+    }
+    return "PUSH_TO_TALK";
+  });
 
   // UX
   const [busy, setBusy] = useState(false);
@@ -217,10 +227,62 @@ export function SetupForm({
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold">Panel Interview</h1>
         <p className="text-sm text-zinc-400">
-          One AI avatar moderates; multiple humans take turns using push-to-talk.
-          Pick your avatar, voice, and context (or create a new one), then start.
+          One AI avatar moderates; multiple humans take turns. Pick your avatar,
+          voice, context, and how you want to talk.
         </p>
       </header>
+
+      <Field
+        label="How do you want to talk?"
+        hint={
+          interactivityType === "PUSH_TO_TALK"
+            ? "Hold a button (or spacebar) to talk; release to send. Best for shared-mic panels."
+            : "Just talk — the avatar listens continuously and replies when you pause. Try this if PTT isn't capturing audio."
+        }
+      >
+        <div className="flex gap-2">
+          <label
+            className={`flex-1 cursor-pointer rounded-lg border px-4 py-3 text-sm transition-colors ${
+              interactivityType === "PUSH_TO_TALK"
+                ? "border-white/40 bg-white/10 text-white"
+                : "border-white/10 bg-zinc-900 hover:bg-white/5 text-zinc-300"
+            }`}
+          >
+            <input
+              type="radio"
+              name="interactivity"
+              value="PUSH_TO_TALK"
+              checked={interactivityType === "PUSH_TO_TALK"}
+              onChange={() => setInteractivityType("PUSH_TO_TALK")}
+              className="sr-only"
+            />
+            <span className="font-medium">Push-to-talk</span>
+            <span className="block text-xs text-zinc-500 mt-0.5">
+              Hold space / button to speak
+            </span>
+          </label>
+          <label
+            className={`flex-1 cursor-pointer rounded-lg border px-4 py-3 text-sm transition-colors ${
+              interactivityType === "VOICE"
+                ? "border-white/40 bg-white/10 text-white"
+                : "border-white/10 bg-zinc-900 hover:bg-white/5 text-zinc-300"
+            }`}
+          >
+            <input
+              type="radio"
+              name="interactivity"
+              value="VOICE"
+              checked={interactivityType === "VOICE"}
+              onChange={() => setInteractivityType("VOICE")}
+              className="sr-only"
+            />
+            <span className="font-medium">Continuous voice (VAD)</span>
+            <span className="block text-xs text-zinc-500 mt-0.5">
+              Just talk — avatar listens always
+            </span>
+          </label>
+        </div>
+      </Field>
 
       <Field
         label="Avatar"
@@ -398,52 +460,6 @@ export function SetupForm({
           placeholder="e.g. Panel"
           className="w-full rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm focus:outline-none focus:border-white/30"
         />
-      </Field>
-
-      <Field
-        label="Interactivity mode"
-        hint={
-          interactivityType === "PUSH_TO_TALK"
-            ? "Hold a button (or spacebar) to talk; release to send. Best for panels with one shared mic."
-            : "Continuous voice with VAD — just talk and the avatar replies when you pause. Try this if PTT isn't capturing audio."
-        }
-      >
-        <div className="flex gap-2">
-          <label
-            className={`flex-1 cursor-pointer rounded-lg border px-3 py-2 text-sm ${
-              interactivityType === "PUSH_TO_TALK"
-                ? "border-white/40 bg-white/10"
-                : "border-white/10 bg-zinc-900 hover:bg-white/5"
-            }`}
-          >
-            <input
-              type="radio"
-              name="interactivity"
-              value="PUSH_TO_TALK"
-              checked={interactivityType === "PUSH_TO_TALK"}
-              onChange={() => setInteractivityType("PUSH_TO_TALK")}
-              className="sr-only"
-            />
-            Push-to-talk
-          </label>
-          <label
-            className={`flex-1 cursor-pointer rounded-lg border px-3 py-2 text-sm ${
-              interactivityType === "VOICE"
-                ? "border-white/40 bg-white/10"
-                : "border-white/10 bg-zinc-900 hover:bg-white/5"
-            }`}
-          >
-            <input
-              type="radio"
-              name="interactivity"
-              value="VOICE"
-              checked={interactivityType === "VOICE"}
-              onChange={() => setInteractivityType("VOICE")}
-              className="sr-only"
-            />
-            Continuous voice (VAD)
-          </label>
-        </div>
       </Field>
 
       {error && (
