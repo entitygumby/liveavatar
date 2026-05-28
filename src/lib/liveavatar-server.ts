@@ -159,3 +159,46 @@ export async function listContexts(): Promise<ContextSummary[]> {
 export async function deleteContext(id: string): Promise<void> {
   await call(`/v1/contexts/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+export type SecretType =
+  | "OPENAI_API_KEY"
+  | "ELEVENLABS_API_KEY"
+  | "GEMINI_API_KEY";
+
+export type Secret = {
+  id: string;
+  secret_name: string;
+  secret_type: SecretType;
+  created_at?: string;
+};
+
+export async function listSecrets(): Promise<Secret[]> {
+  // The list-secrets endpoint returns metadata only (never values).
+  // Returns `data` as an array directly (not paginated).
+  const res = await call<{ data: Secret[] }>("/v1/secrets");
+  return res.data ?? [];
+}
+
+export async function createSecret(input: {
+  secret_type: SecretType;
+  secret_name: string;
+  secret_value: string;
+}): Promise<{ id: string; secret_name: string }> {
+  const res = await call<{ data: { id: string; secret_name: string } }>(
+    "/v1/secrets",
+    { method: "POST", body: input },
+  );
+  return res.data;
+}
+
+export async function bindThirdPartyVoice(input: {
+  provider_voice_id: string;
+  secret_id: string;
+  name?: string;
+}): Promise<{ voice_id: string }> {
+  const res = await call<{ data: { voice_id: string } }>(
+    "/v1/voices/third_party",
+    { method: "POST", body: input },
+  );
+  return res.data;
+}

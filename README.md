@@ -73,6 +73,32 @@ In the browser (`InterviewStage.tsx`):
 - **Release** → `session.voiceChat.stopPushToTalk()` + `session.stopListening()`. The avatar then processes the audio and responds.
 - Live transcripts come in via `AgentEventsEnum.USER_TRANSCRIPTION_CHUNK` and `AVATAR_TRANSCRIPTION_CHUNK`.
 
+## Custom voices (ElevenLabs binding)
+
+LiveAvatar doesn't clone voices directly — it **binds voices from providers**
+(currently ElevenLabs). The setup form's "+ Add a custom voice" panel walks
+you through the two-step flow:
+
+1. **Outside this app** — clone or design a voice at
+   [elevenlabs.io](https://elevenlabs.io/app/voice-library) (voice cloning needs
+   a Starter+ plan), then copy the voice ID and your ElevenLabs API key.
+2. **In the form** — open the panel, paste the API key (first time only — it
+   gets stored as an encrypted LiveAvatar secret via `POST /v1/secrets` with
+   `secret_type: "ELEVENLABS_API_KEY"`), paste the ElevenLabs voice ID, and
+   click **Add voice**. The route calls `POST /v1/voices/third_party` to bind
+   it and returns a LiveAvatar `voice_id`. The voice dropdown refreshes and
+   the new voice is auto-selected.
+
+Subsequent custom voices reuse the saved ElevenLabs key — no need to paste it
+each time. Keys are encrypted at rest by LiveAvatar (AWS KMS); this app
+never logs or persists them.
+
+| Step | Endpoint (upstream) | Local route |
+|------|--------------------|-------------|
+| List your ElevenLabs keys | `GET /v1/secrets` | `GET /api/provider-keys?type=ELEVENLABS_API_KEY` |
+| Save a new key | `POST /v1/secrets` | `POST /api/provider-keys` |
+| Bind voice | `POST /v1/voices/third_party` | `POST /api/voices/bind` |
+
 ## Customising the moderator (reusable contexts)
 
 The setup form has a **Context** dropdown:
@@ -111,6 +137,9 @@ Default values for the prompt and opening line live in `src/lib/interview-defaul
 | `src/app/api/voices/route.ts` | List public + private voices (`GET /v1/voices`) |
 | `src/app/api/contexts/route.ts` | List your saved contexts (`GET /v1/contexts`) |
 | `src/app/api/contexts/[id]/route.ts` | Delete a saved context (`DELETE /v1/contexts/{id}`) |
+| `src/app/api/provider-keys/route.ts` | List / create LiveAvatar secrets (`/v1/secrets`) |
+| `src/app/api/voices/bind/route.ts` | Bind a third-party voice (`POST /v1/voices/third_party`) |
+| `src/components/AddCustomVoice.tsx` | Inline panel: paste ElevenLabs key + voice ID, bind |
 | `src/components/SetupForm.tsx` | Pre-session config UI |
 | `src/components/InterviewStage.tsx` | Video + PTT + transcript + SDK lifecycle |
 | `src/app/page.tsx` | Top-level flow controller |

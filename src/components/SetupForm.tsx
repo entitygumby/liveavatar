@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AddCustomVoice } from "./AddCustomVoice";
 
 type Avatar = {
   id: string;
@@ -74,6 +75,34 @@ export function SetupForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const refreshVoices = useCallback(async () => {
+    try {
+      const res = await fetch("/api/voices");
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || `Failed (${res.status})`);
+      setPrivateVoices(body.private || []);
+      setPublicVoices(body.public || []);
+      return {
+        privateVoices: (body.private as Voice[]) || [],
+        publicVoices: (body.public as Voice[]) || [],
+      };
+    } catch (err) {
+      setVoicesErr(err instanceof Error ? err.message : String(err));
+      return { privateVoices: [], publicVoices: [] };
+    }
+  }, []);
+
+  const refreshContexts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/contexts");
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || `Failed (${res.status})`);
+      setContexts((body.contexts as Ctx[]) ?? []);
+    } catch (err) {
+      setContextsErr(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
   // Fetch avatars, voices, contexts on mount
   useEffect(() => {
     let cancelled = false;
@@ -100,40 +129,21 @@ export function SetupForm({
       }
     })();
 
-    (async () => {
-      try {
-        const res = await fetch("/api/voices");
-        const body = await res.json();
-        if (!res.ok) throw new Error(body?.error || `Failed (${res.status})`);
-        if (!cancelled) {
-          setPrivateVoices(body.private || []);
-          setPublicVoices(body.public || []);
-        }
-      } catch (err) {
-        if (!cancelled)
-          setVoicesErr(err instanceof Error ? err.message : String(err));
-      }
-    })();
-
-    refreshContexts(cancelled);
+    refreshVoices();
+    refreshContexts();
 
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshVoices, refreshContexts]);
 
-  async function refreshContexts(cancelled = false) {
-    try {
-      const res = await fetch("/api/contexts");
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error || `Failed (${res.status})`);
-      if (!cancelled) setContexts((body.contexts as Ctx[]) ?? []);
-    } catch (err) {
-      if (!cancelled)
-        setContextsErr(err instanceof Error ? err.message : String(err));
-    }
-  }
+  const handleCustomVoiceAdded = useCallback(
+    async (newVoiceId: string) => {
+      await refreshVoices();
+      setVoiceId(newVoiceId);
+    },
+    [refreshVoices],
+  );
 
   const selectedAvatar = useMemo(
     () => avatars?.find((a) => a.id === avatarId),
@@ -283,6 +293,9 @@ export function SetupForm({
             </optgroup>
           )}
         </select>
+        <div className="mt-2">
+          <AddCustomVoice onVoiceAdded={handleCustomVoiceAdded} />
+        </div>
       </Field>
 
       <Field
