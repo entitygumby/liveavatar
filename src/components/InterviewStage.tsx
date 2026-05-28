@@ -9,6 +9,11 @@ import {
   VoiceChatEvent,
   VoiceChatState,
 } from "@heygen/liveavatar-web-sdk";
+import { MicDiagnostics } from "./MicDiagnostics";
+
+const log = (...args: unknown[]) =>
+  // eslint-disable-next-line no-console
+  console.log("[LiveAvatar]", ...args);
 
 type TranscriptLine = {
   id: string;
@@ -114,6 +119,7 @@ export function InterviewStage({
     sessionRef.current = session;
 
     session.on(SessionEvent.SESSION_STATE_CHANGED, (state: SessionState) => {
+      log("SESSION_STATE_CHANGED", state);
       setSessionState(state);
       if (state === SessionState.DISCONNECTED) {
         session.removeAllListeners();
@@ -122,6 +128,7 @@ export function InterviewStage({
     });
 
     session.on(SessionEvent.SESSION_STREAM_READY, () => {
+      log("SESSION_STREAM_READY");
       setIsStreamReady(true);
       if (videoRef.current) {
         session.attach(videoRef.current);
@@ -129,26 +136,32 @@ export function InterviewStage({
     });
 
     session.voiceChat.on(VoiceChatEvent.STATE_CHANGED, (s: VoiceChatState) => {
+      log("VOICE_CHAT_STATE_CHANGED", s);
       setVoiceActive(s === VoiceChatState.ACTIVE);
     });
 
-    session.on(AgentEventsEnum.USER_SPEAK_STARTED, () =>
-      setIsUserTalking(true),
-    );
-    session.on(AgentEventsEnum.USER_SPEAK_ENDED, () =>
-      setIsUserTalking(false),
-    );
-    session.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, () =>
-      setIsAvatarTalking(true),
-    );
-    session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, () =>
-      setIsAvatarTalking(false),
-    );
+    session.on(AgentEventsEnum.USER_SPEAK_STARTED, () => {
+      log("USER_SPEAK_STARTED");
+      setIsUserTalking(true);
+    });
+    session.on(AgentEventsEnum.USER_SPEAK_ENDED, () => {
+      log("USER_SPEAK_ENDED");
+      setIsUserTalking(false);
+    });
+    session.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, () => {
+      log("AVATAR_SPEAK_STARTED");
+      setIsAvatarTalking(true);
+    });
+    session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, () => {
+      log("AVATAR_SPEAK_ENDED");
+      setIsAvatarTalking(false);
+    });
 
     session.on(
       AgentEventsEnum.USER_TRANSCRIPTION_CHUNK,
       (e: { text?: string }) => {
         const chunk = e?.text ?? "";
+        log("USER_TRANSCRIPTION_CHUNK", chunk);
         if (!chunk) return;
         userPartialRef.current += chunk;
         updatePartial("user", userPartialRef.current);
@@ -158,6 +171,7 @@ export function InterviewStage({
       AgentEventsEnum.USER_TRANSCRIPTION,
       (e: { text?: string }) => {
         const finalText = e?.text ?? userPartialRef.current;
+        log("USER_TRANSCRIPTION (final)", finalText);
         userPartialRef.current = "";
         if (finalText) finalisePartial("user", finalText);
       },
@@ -166,6 +180,7 @@ export function InterviewStage({
       AgentEventsEnum.AVATAR_TRANSCRIPTION_CHUNK,
       (e: { text?: string }) => {
         const chunk = e?.text ?? "";
+        log("AVATAR_TRANSCRIPTION_CHUNK", chunk);
         if (!chunk) return;
         avatarPartialRef.current += chunk;
         updatePartial("avatar", avatarPartialRef.current);
@@ -175,6 +190,7 @@ export function InterviewStage({
       AgentEventsEnum.AVATAR_TRANSCRIPTION,
       (e: { text?: string }) => {
         const finalText = e?.text ?? avatarPartialRef.current;
+        log("AVATAR_TRANSCRIPTION (final)", finalText);
         avatarPartialRef.current = "";
         if (finalText) finalisePartial("avatar", finalText);
       },
@@ -182,11 +198,16 @@ export function InterviewStage({
 
     (async () => {
       try {
+        log("session.start() …");
         await session.start();
+        log("session.start() ok");
         if (cancelled) return;
+        log("voiceChat.start() …");
         await session.voiceChat.start();
+        log("voiceChat.start() ok — mic permission granted");
       } catch (err) {
         const m = err instanceof Error ? err.message : String(err);
+        log("startup error", err);
         setErrorMsg(m);
       }
     })();
@@ -223,11 +244,14 @@ export function InterviewStage({
     const session = sessionRef.current;
     if (!session) return;
     try {
+      log("PTT start");
       setIsPushing(true);
       await session.startListening();
       await session.voiceChat.startPushToTalk();
+      log("PTT capturing audio");
     } catch (err) {
       const m = err instanceof Error ? err.message : String(err);
+      log("PTT start error", err);
       setErrorMsg(m);
       setIsPushing(false);
     }
@@ -237,10 +261,23 @@ export function InterviewStage({
     const session = sessionRef.current;
     if (!session) return;
     try {
+      log("PTT stop");
       await session.voiceChat.stopPushToTalk();
       await session.stopListening();
     } finally {
       setIsPushing(false);
+    }
+  }, []);
+
+  const handleDeviceChange = useCallback((deviceId: string) => {
+    const session = sessionRef.current;
+    if (!session) return;
+    log("setDevice", deviceId);
+    try {
+      // SDK accepts a deviceId string (ConstrainDOMString)
+      void session.voiceChat.setDevice(deviceId);
+    } catch (err) {
+      log("setDevice error", err);
     }
   }, []);
 
@@ -366,18 +403,35 @@ export function InterviewStage({
         </aside>
       </div>
 
-      <div className="flex flex-col items-center gap-2">
+      <div className="flex flex-col items-center gap-3">
         {errorMsg && (
           <p className="text-red-300 text-xs bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-lg">
             {errorMsg}
           </p>
         )}
+
+        {/* Diagnostic breadcrumb — confirm each stage of the chain */}
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-zinc-500 font-mono">
+          <Crumb label="session" value={sessionState} ok={
+            sessionState === SessionState.CONNECTED
+          } />
+          <Crumb label="voice" value={voiceActive ? "ACTIVE" : "off"} ok={voiceActive} />
+          <Crumb label="pushing" value={isPushing ? "yes" : "no"} ok={isPushing} />
+          <Crumb label="user-spk" value={isUserTalking ? "yes" : "no"} ok={isUserTalking} />
+        </div>
+
         <PushToTalkButton
           ready={voiceActive && sessionState === SessionState.CONNECTED}
           pushing={isPushing}
           onStart={handlePushStart}
           onStop={handlePushStop}
         />
+
+        <MicDiagnostics
+          enabled={voiceActive}
+          onDeviceChange={handleDeviceChange}
+        />
+
         <div className="flex items-center gap-2">
           <button
             onClick={handleInterrupt}
@@ -386,8 +440,37 @@ export function InterviewStage({
             Interrupt
           </button>
         </div>
+
+        <p className="text-[11px] text-zinc-500 max-w-md text-center leading-relaxed">
+          Hold the button while speaking; release to send. The mic meter should
+          jump while you talk. If <span className="text-zinc-300">user-spk</span>{" "}
+          never turns on while you hold + speak, the SDK isn&apos;t getting your
+          audio.
+        </p>
       </div>
     </div>
+  );
+}
+
+function Crumb({
+  label,
+  value,
+  ok,
+}: {
+  label: string;
+  value: string;
+  ok: boolean;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        className={`w-1.5 h-1.5 rounded-full ${
+          ok ? "bg-green-400" : "bg-zinc-700"
+        }`}
+      />
+      <span className="text-zinc-600">{label}:</span>
+      <span className={ok ? "text-zinc-200" : "text-zinc-500"}>{value}</span>
+    </span>
   );
 }
 
