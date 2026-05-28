@@ -41,7 +41,7 @@ type Props = {
     contextName?: string;
     prompt?: string;
     openingText?: string;
-    interactivityType: "PUSH_TO_TALK" | "VOICE";
+    interactivityType: "PUSH_TO_TALK" | "CONVERSATIONAL";
   }) => Promise<{ contextId?: string; newContextCreated?: boolean }>;
 };
 
@@ -72,14 +72,15 @@ export function SetupForm({
   const [avatarId, setAvatarId] = useState<string>("");
   const [voiceId, setVoiceId] = useState<string>("");
   const [interactivityType, setInteractivityType] = useState<
-    "PUSH_TO_TALK" | "VOICE"
+    "PUSH_TO_TALK" | "CONVERSATIONAL"
   >(() => {
     // Allow URL override: /?mode=voice or /?mode=ptt
     if (typeof window !== "undefined") {
       const m = new URLSearchParams(window.location.search)
         .get("mode")
         ?.toLowerCase();
-      if (m === "voice" || m === "vad") return "VOICE";
+      if (m === "voice" || m === "vad" || m === "conversational")
+        return "CONVERSATIONAL";
       if (m === "ptt" || m === "push") return "PUSH_TO_TALK";
     }
     return "PUSH_TO_TALK";
@@ -263,7 +264,7 @@ export function SetupForm({
           </label>
           <label
             className={`flex-1 cursor-pointer rounded-lg border px-4 py-3 text-sm transition-colors ${
-              interactivityType === "VOICE"
+              interactivityType === "CONVERSATIONAL"
                 ? "border-white/40 bg-white/10 text-white"
                 : "border-white/10 bg-zinc-900 hover:bg-white/5 text-zinc-300"
             }`}
@@ -271,9 +272,9 @@ export function SetupForm({
             <input
               type="radio"
               name="interactivity"
-              value="VOICE"
-              checked={interactivityType === "VOICE"}
-              onChange={() => setInteractivityType("VOICE")}
+              value="CONVERSATIONAL"
+              checked={interactivityType === "CONVERSATIONAL"}
+              onChange={() => setInteractivityType("CONVERSATIONAL")}
               className="sr-only"
             />
             <span className="font-medium">Continuous voice (VAD)</span>

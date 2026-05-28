@@ -17,7 +17,7 @@ type RequestBody = {
   contextName?: string;
   avatarId?: string;
   voiceId?: string;
-  interactivityType?: "PUSH_TO_TALK" | "VOICE";
+  interactivityType?: "PUSH_TO_TALK" | "CONVERSATIONAL";
 };
 
 export async function POST(req: Request) {

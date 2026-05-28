@@ -27,7 +27,7 @@ type Props = {
   sessionToken: string;
   sandbox: boolean;
   speakerTag: string;
-  interactivityType: "PUSH_TO_TALK" | "VOICE";
+  interactivityType: "PUSH_TO_TALK" | "CONVERSATIONAL";
   onEnd: () => void;
 };
 
@@ -536,7 +536,7 @@ export function InterviewStage({
             value={isUserTalking ? "yes" : "no"}
             ok={isUserTalking}
           />
-          <Crumb label="mode" value={isPTT ? "PTT" : "VOICE"} ok={true} />
+          <Crumb label="mode" value={isPTT ? "PTT" : "VAD"} ok={true} />
         </div>
 
         {isPTT && (

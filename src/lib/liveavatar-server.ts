@@ -78,7 +78,7 @@ export async function createSessionToken(input: {
   avatar_id: string;
   avatar_persona: { voice_id?: string; context_id?: string; language: string };
   is_sandbox?: boolean;
-  interactivity_type?: "PUSH_TO_TALK" | "VOICE";
+  interactivity_type?: "PUSH_TO_TALK" | "CONVERSATIONAL";
   video_quality?: "very_high" | "high" | "medium" | "low";
 }): Promise<SessionTokenResponse> {
   return call<SessionTokenResponse>("/v1/sessions/token", {

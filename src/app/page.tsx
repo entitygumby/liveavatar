@@ -9,7 +9,7 @@ type ActiveSession = {
   sessionToken: string;
   sandbox: boolean;
   speakerTag: string;
-  interactivityType: "PUSH_TO_TALK" | "VOICE";
+  interactivityType: "PUSH_TO_TALK" | "CONVERSATIONAL";
 };
 
 export default function HomePage() {
@@ -24,7 +24,7 @@ export default function HomePage() {
       contextName?: string;
       prompt?: string;
       openingText?: string;
-      interactivityType: "PUSH_TO_TALK" | "VOICE";
+      interactivityType: "PUSH_TO_TALK" | "CONVERSATIONAL";
     }) => {
       const res = await fetch("/api/session", {
         method: "POST",
