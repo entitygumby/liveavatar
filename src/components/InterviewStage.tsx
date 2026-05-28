@@ -27,6 +27,7 @@ type Props = {
   sessionToken: string;
   sandbox: boolean;
   speakerTag: string;
+  interactivityType: "PUSH_TO_TALK" | "VOICE";
   onEnd: () => void;
 };
 
@@ -36,13 +37,17 @@ export function InterviewStage({
   sessionToken,
   sandbox,
   speakerTag,
+  interactivityType,
   onEnd,
 }: Props) {
+  const isPTT = interactivityType === "PUSH_TO_TALK";
   const sessionRef = useRef<LiveAvatarSession | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const speakerTagRef = useRef(speakerTag);
   const userPartialRef = useRef<string>("");
   const avatarPartialRef = useRef<string>("");
+  const handlePushStartRef = useRef<(() => void) | null>(null);
+  const handlePushStopRef = useRef<(() => void) | null>(null);
 
   const [sessionState, setSessionState] = useState<SessionState>(
     SessionState.INACTIVE,
@@ -240,33 +245,83 @@ export function InterviewStage({
     }
   }, [sessionState, onEnd]);
 
-  const handlePushStart = useCallback(async () => {
+  // Global mouseup: if you press the PTT button and drift off it, capture
+  // should still stop on release — not on the moment your cursor leaves.
+  useEffect(() => {
+    if (!isPTT || !isPushing) return;
+    const onUp = () => handlePushStopRef.current?.();
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchend", onUp);
+    return () => {
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("touchend", onUp);
+    };
+  }, [isPTT, isPushing]);
+
+  const handlePushStart = useCallback(() => {
     const session = sessionRef.current;
     if (!session) return;
-    try {
-      log("PTT start");
-      setIsPushing(true);
-      await session.startListening();
-      await session.voiceChat.startPushToTalk();
-      log("PTT capturing audio");
-    } catch (err) {
-      const m = err instanceof Error ? err.message : String(err);
-      log("PTT start error", err);
-      setErrorMsg(m);
-      setIsPushing(false);
-    }
+    log("PTT start");
+    setIsPushing(true);
+    // Start audio capture FIRST — no await, so capture begins immediately.
+    // The listening pose is fire-and-forget so it can't delay capture.
+    session.voiceChat
+      .startPushToTalk()
+      .then(() => log("PTT capturing audio"))
+      .catch((err) => {
+        log("PTT start error", err);
+        setErrorMsg(err instanceof Error ? err.message : String(err));
+        setIsPushing(false);
+      });
+    session.startListening().catch((err) => log("startListening error", err));
   }, []);
 
-  const handlePushStop = useCallback(async () => {
+  const handlePushStop = useCallback(() => {
     const session = sessionRef.current;
     if (!session) return;
-    try {
-      log("PTT stop");
-      await session.voiceChat.stopPushToTalk();
-      await session.stopListening();
-    } finally {
-      setIsPushing(false);
-    }
+    log("PTT stop");
+    setIsPushing(false);
+    session.voiceChat
+      .stopPushToTalk()
+      .catch((err) => log("stopPushToTalk error", err));
+    session.stopListening().catch((err) => log("stopListening error", err));
+  }, []);
+
+  // Keep refs to latest PTT handlers so global listeners stay current
+  useEffect(() => {
+    handlePushStartRef.current = handlePushStart;
+    handlePushStopRef.current = handlePushStop;
+  }, [handlePushStart, handlePushStop]);
+
+  // Keyboard PTT: hold SPACE to talk (skip when typing in an input)
+  useEffect(() => {
+    if (!isPTT) return;
+    const isEditable = (el: EventTarget | null) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el.isContentEditable
+      );
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat || isEditable(e.target)) return;
+      e.preventDefault();
+      handlePushStartRef.current?.();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || isEditable(e.target)) return;
+      e.preventDefault();
+      handlePushStopRef.current?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
   }, []);
 
   const handleDeviceChange = useCallback((deviceId: string) => {
@@ -412,20 +467,39 @@ export function InterviewStage({
 
         {/* Diagnostic breadcrumb — confirm each stage of the chain */}
         <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-zinc-500 font-mono">
-          <Crumb label="session" value={sessionState} ok={
-            sessionState === SessionState.CONNECTED
-          } />
-          <Crumb label="voice" value={voiceActive ? "ACTIVE" : "off"} ok={voiceActive} />
-          <Crumb label="pushing" value={isPushing ? "yes" : "no"} ok={isPushing} />
-          <Crumb label="user-spk" value={isUserTalking ? "yes" : "no"} ok={isUserTalking} />
+          <Crumb
+            label="session"
+            value={sessionState}
+            ok={sessionState === SessionState.CONNECTED}
+          />
+          <Crumb
+            label="voice"
+            value={voiceActive ? "ACTIVE" : "off"}
+            ok={voiceActive}
+          />
+          {isPTT && (
+            <Crumb
+              label="pushing"
+              value={isPushing ? "yes" : "no"}
+              ok={isPushing}
+            />
+          )}
+          <Crumb
+            label="user-spk"
+            value={isUserTalking ? "yes" : "no"}
+            ok={isUserTalking}
+          />
+          <Crumb label="mode" value={isPTT ? "PTT" : "VOICE"} ok={true} />
         </div>
 
-        <PushToTalkButton
-          ready={voiceActive && sessionState === SessionState.CONNECTED}
-          pushing={isPushing}
-          onStart={handlePushStart}
-          onStop={handlePushStop}
-        />
+        {isPTT && (
+          <PushToTalkButton
+            ready={voiceActive && sessionState === SessionState.CONNECTED}
+            pushing={isPushing}
+            onStart={handlePushStart}
+            onStop={handlePushStop}
+          />
+        )}
 
         <MicDiagnostics
           enabled={voiceActive}
@@ -442,10 +516,21 @@ export function InterviewStage({
         </div>
 
         <p className="text-[11px] text-zinc-500 max-w-md text-center leading-relaxed">
-          Hold the button while speaking; release to send. The mic meter should
-          jump while you talk. If <span className="text-zinc-300">user-spk</span>{" "}
-          never turns on while you hold + speak, the SDK isn&apos;t getting your
-          audio.
+          {isPTT ? (
+            <>
+              Hold the button (or <kbd className="px-1 rounded bg-white/10">space</kbd>)
+              while speaking; release to send. The mic meter should jump while
+              you talk. If <span className="text-zinc-300">user-spk</span> never
+              turns on, the SDK isn&apos;t getting your audio — try the
+              microphone selector above, or restart in Continuous Voice mode.
+            </>
+          ) : (
+            <>
+              Just speak — the avatar listens continuously and replies when you
+              pause. <span className="text-zinc-300">user-spk</span> should
+              light up shortly after you start talking.
+            </>
+          )}
         </p>
       </div>
     </div>
@@ -517,7 +602,6 @@ function PushToTalkButton({
       disabled={!ready}
       onMouseDown={onStart}
       onMouseUp={onStop}
-      onMouseLeave={pushing ? onStop : undefined}
       onTouchStart={(e) => {
         e.preventDefault();
         onStart();

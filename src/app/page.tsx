@@ -9,6 +9,7 @@ type ActiveSession = {
   sessionToken: string;
   sandbox: boolean;
   speakerTag: string;
+  interactivityType: "PUSH_TO_TALK" | "VOICE";
 };
 
 export default function HomePage() {
@@ -23,6 +24,7 @@ export default function HomePage() {
       contextName?: string;
       prompt?: string;
       openingText?: string;
+      interactivityType: "PUSH_TO_TALK" | "VOICE";
     }) => {
       const res = await fetch("/api/session", {
         method: "POST",
@@ -34,6 +36,7 @@ export default function HomePage() {
           contextName: input.contextName,
           prompt: input.prompt,
           openingText: input.openingText,
+          interactivityType: input.interactivityType,
         }),
       });
       const body = await res.json();
@@ -44,6 +47,7 @@ export default function HomePage() {
         sessionToken: body.sessionToken,
         sandbox: !!body.sandbox,
         speakerTag: input.speakerTag,
+        interactivityType: input.interactivityType,
       });
       return {
         contextId: body.contextId as string | undefined,
@@ -77,6 +81,7 @@ export default function HomePage() {
         sessionToken={session.sessionToken}
         sandbox={session.sandbox}
         speakerTag={session.speakerTag}
+        interactivityType={session.interactivityType}
         onEnd={handleEnd}
       />
     </main>

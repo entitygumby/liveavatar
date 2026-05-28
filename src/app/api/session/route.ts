@@ -17,6 +17,7 @@ type RequestBody = {
   contextName?: string;
   avatarId?: string;
   voiceId?: string;
+  interactivityType?: "PUSH_TO_TALK" | "VOICE";
 };
 
 export async function POST(req: Request) {
@@ -87,6 +88,8 @@ export async function POST(req: Request) {
       }
     }
 
+    const interactivity = body.interactivityType ?? "PUSH_TO_TALK";
+
     const token = await createSessionToken({
       mode: "FULL",
       avatar_id: avatarId,
@@ -96,7 +99,7 @@ export async function POST(req: Request) {
         language: "en",
       },
       is_sandbox: sandbox,
-      interactivity_type: "PUSH_TO_TALK",
+      interactivity_type: interactivity,
       video_quality: "high",
     });
 
@@ -107,6 +110,7 @@ export async function POST(req: Request) {
       contextId,
       newContextCreated,
       reusedExistingContext,
+      interactivityType: interactivity,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
