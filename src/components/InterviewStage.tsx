@@ -5,6 +5,7 @@ import {
   AgentEventsEnum,
   LiveAvatarSession,
   SessionEvent,
+  SessionInteractivityMode,
   SessionState,
   VoiceChatEvent,
   VoiceChatState,
@@ -121,7 +122,16 @@ export function InterviewStage({
   // Start session + wire all SDK events
   useEffect(() => {
     let cancelled = false;
-    const session = new LiveAvatarSession(sessionToken, { voiceChat: true });
+    // Mirror the official demo: pass {mode: PUSH_TO_TALK} when the server-side
+    // token uses PTT, plain `true` for continuous. The SDK uses this to decide
+    // whether to auto-stream the mic or wait for explicit PTT windows.
+    const voiceChatConfig = isPTT
+      ? { mode: SessionInteractivityMode.PUSH_TO_TALK }
+      : true;
+    log("creating session", { isPTT, voiceChatConfig });
+    const session = new LiveAvatarSession(sessionToken, {
+      voiceChat: voiceChatConfig,
+    });
     sessionRef.current = session;
 
     session.on(SessionEvent.SESSION_STATE_CHANGED, (state: SessionState) => {
@@ -241,7 +251,7 @@ export function InterviewStage({
       session.voiceChat.removeAllListeners();
       session.stop().catch(() => {});
     };
-  }, [sessionToken, updatePartial, finalisePartial]);
+  }, [sessionToken, isPTT, updatePartial, finalisePartial]);
 
   // Keep-alive heartbeat
   useEffect(() => {

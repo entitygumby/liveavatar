@@ -90,6 +90,9 @@ export async function POST(req: Request) {
 
     const interactivity = body.interactivityType ?? "PUSH_TO_TALK";
 
+    // Match the official demo's pattern: only send interactivity_type when
+    // PTT is wanted. CONVERSATIONAL is the server default — sending it
+    // explicitly used to 422 in the past, so we conditionally spread.
     const token = await createSessionToken({
       mode: "FULL",
       avatar_id: avatarId,
@@ -99,7 +102,9 @@ export async function POST(req: Request) {
         language: "en",
       },
       is_sandbox: sandbox,
-      interactivity_type: interactivity,
+      ...(interactivity === "PUSH_TO_TALK"
+        ? { interactivity_type: "PUSH_TO_TALK" as const }
+        : {}),
       video_quality: "high",
     });
 
