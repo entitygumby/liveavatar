@@ -6,10 +6,11 @@ export const dynamic = "force-dynamic";
 
 export async function DELETE(
   _req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await deleteContext(params.id);
+    const { id } = await params;
+    await deleteContext(id);
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
