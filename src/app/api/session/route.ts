@@ -3,6 +3,7 @@ import {
   SANDBOX_AVATAR_ID,
   createContext,
   createSessionToken,
+  listContexts,
 } from "@/lib/liveavatar-server";
 import { DEFAULT_INTERVIEW_CONTEXT } from "@/lib/interview-defaults";
 
@@ -51,20 +52,39 @@ export async function POST(req: Request) {
     // Context resolution order:
     //   1. explicit contextId in request (user picked a saved one)
     //   2. LIVEAVATAR_CONTEXT_ID env var (pinned default)
-    //   3. create a new context from prompt/openingText
+    //   3. reuse an existing context with the same name (idempotent)
+    //   4. create a new context from prompt/openingText
     let contextId: string | null =
       body.contextId || process.env.LIVEAVATAR_CONTEXT_ID || null;
     let newContextCreated = false;
+    let reusedExistingContext = false;
 
     if (!contextId) {
-      const ctx = await createContext({
-        name: body.contextName ?? DEFAULT_INTERVIEW_CONTEXT.name,
-        prompt: body.prompt ?? DEFAULT_INTERVIEW_CONTEXT.prompt,
-        opening_text:
-          body.openingText ?? DEFAULT_INTERVIEW_CONTEXT.opening_text,
-      });
-      contextId = ctx.data.id;
-      newContextCreated = true;
+      const wantName = body.contextName ?? DEFAULT_INTERVIEW_CONTEXT.name;
+
+      // Reuse an existing context with the same name if one is there.
+      // This makes repeat sessions cheap and avoids the 4000 conflict.
+      try {
+        const existing = await listContexts();
+        const match = existing.find((c) => c.name === wantName);
+        if (match) {
+          contextId = match.id;
+          reusedExistingContext = true;
+        }
+      } catch {
+        // If listing fails, fall through and try to create anyway.
+      }
+
+      if (!contextId) {
+        const ctx = await createContext({
+          name: wantName,
+          prompt: body.prompt ?? DEFAULT_INTERVIEW_CONTEXT.prompt,
+          opening_text:
+            body.openingText ?? DEFAULT_INTERVIEW_CONTEXT.opening_text,
+        });
+        contextId = ctx.data.id;
+        newContextCreated = true;
+      }
     }
 
     const token = await createSessionToken({
@@ -86,6 +106,7 @@ export async function POST(req: Request) {
       sandbox,
       contextId,
       newContextCreated,
+      reusedExistingContext,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
