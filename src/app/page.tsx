@@ -16,20 +16,24 @@ export default function HomePage() {
 
   const handleStart = useCallback(
     async (input: {
-      prompt: string;
-      openingText: string;
       speakerTag: string;
       avatarId?: string;
       voiceId?: string;
+      contextId?: string;
+      contextName?: string;
+      prompt?: string;
+      openingText?: string;
     }) => {
       const res = await fetch("/api/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: input.prompt,
-          openingText: input.openingText,
           avatarId: input.avatarId,
           voiceId: input.voiceId,
+          contextId: input.contextId,
+          contextName: input.contextName,
+          prompt: input.prompt,
+          openingText: input.openingText,
         }),
       });
       const body = await res.json();
@@ -41,6 +45,10 @@ export default function HomePage() {
         sandbox: !!body.sandbox,
         speakerTag: input.speakerTag,
       });
+      return {
+        contextId: body.contextId as string | undefined,
+        newContextCreated: !!body.newContextCreated,
+      };
     },
     [],
   );
@@ -55,6 +63,7 @@ export default function HomePage() {
         <SetupForm
           defaultPrompt={DEFAULT_INTERVIEW_CONTEXT.prompt}
           defaultOpening={DEFAULT_INTERVIEW_CONTEXT.opening_text}
+          defaultContextName={DEFAULT_INTERVIEW_CONTEXT.name}
           defaultSpeakerTag="Panel"
           onStart={handleStart}
         />

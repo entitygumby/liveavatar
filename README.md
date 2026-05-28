@@ -73,18 +73,21 @@ In the browser (`InterviewStage.tsx`):
 - **Release** → `session.voiceChat.stopPushToTalk()` + `session.stopListening()`. The avatar then processes the audio and responds.
 - Live transcripts come in via `AgentEventsEnum.USER_TRANSCRIPTION_CHUNK` and `AVATAR_TRANSCRIPTION_CHUNK`.
 
-## Customising the moderator
+## Customising the moderator (reusable contexts)
 
-Edit `src/lib/interview-defaults.ts` to change the default system prompt and opening line, or override per-session in the SetupForm before starting. To pin a reusable context, create one via the API:
+The setup form has a **Context** dropdown:
 
-```bash
-curl -X POST https://api.liveavatar.com/v1/contexts ^
-  -H "X-API-KEY: %LIVEAVATAR_API_KEY%" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"name\":\"Panel Moderator\",\"prompt\":\"...\",\"opening_text\":\"...\"}"
-```
+- **+ Create new context from fields below** (default) — type a name, prompt, and opening line. On submit, the API creates a context, returns its ID, and the session uses it. The dropdown refreshes automatically, so the new context is available next time.
+- **Saved contexts** — pick one and the prompt/opening fields disappear; the session uses the saved context directly (no `POST /v1/contexts` call).
+- **Delete** — removes the selected context via `DELETE /v1/contexts/{id}`.
 
-…and set `LIVEAVATAR_CONTEXT_ID` in `.env.local`.
+You can also pin a context via `LIVEAVATAR_CONTEXT_ID` in `.env.local`. The resolution order in `/api/session` is:
+
+1. `contextId` from the form (user picked a saved one)
+2. `LIVEAVATAR_CONTEXT_ID` env var
+3. Create a new one from the prompt/opening fields
+
+Default values for the prompt and opening line live in `src/lib/interview-defaults.ts`.
 
 ## Gotchas
 
@@ -106,6 +109,8 @@ curl -X POST https://api.liveavatar.com/v1/contexts ^
 | `src/app/api/stop/route.ts` | End the session |
 | `src/app/api/avatars/route.ts` | List your active avatars (`GET /v1/avatars`) |
 | `src/app/api/voices/route.ts` | List public + private voices (`GET /v1/voices`) |
+| `src/app/api/contexts/route.ts` | List your saved contexts (`GET /v1/contexts`) |
+| `src/app/api/contexts/[id]/route.ts` | Delete a saved context (`DELETE /v1/contexts/{id}`) |
 | `src/components/SetupForm.tsx` | Pre-session config UI |
 | `src/components/InterviewStage.tsx` | Video + PTT + transcript + SDK lifecycle |
 | `src/app/page.tsx` | Top-level flow controller |

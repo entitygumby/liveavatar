@@ -10,6 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type RequestBody = {
+  contextId?: string;
   prompt?: string;
   openingText?: string;
   contextName?: string;
@@ -47,7 +48,14 @@ export async function POST(req: Request) {
       process.env.LIVEAVATAR_VOICE_ID ||
       undefined;
 
-    let contextId = process.env.LIVEAVATAR_CONTEXT_ID || null;
+    // Context resolution order:
+    //   1. explicit contextId in request (user picked a saved one)
+    //   2. LIVEAVATAR_CONTEXT_ID env var (pinned default)
+    //   3. create a new context from prompt/openingText
+    let contextId: string | null =
+      body.contextId || process.env.LIVEAVATAR_CONTEXT_ID || null;
+    let newContextCreated = false;
+
     if (!contextId) {
       const ctx = await createContext({
         name: body.contextName ?? DEFAULT_INTERVIEW_CONTEXT.name,
@@ -56,6 +64,7 @@ export async function POST(req: Request) {
           body.openingText ?? DEFAULT_INTERVIEW_CONTEXT.opening_text,
       });
       contextId = ctx.data.id;
+      newContextCreated = true;
     }
 
     const token = await createSessionToken({
@@ -75,6 +84,8 @@ export async function POST(req: Request) {
       sessionId: token.data.session_id,
       sessionToken: token.data.session_token,
       sandbox,
+      contextId,
+      newContextCreated,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

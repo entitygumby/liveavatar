@@ -141,3 +141,21 @@ export async function listVoices(
   });
   return res.data.results;
 }
+
+export type ContextSummary = {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listContexts(): Promise<ContextSummary[]> {
+  const res = await call<Paginated<ContextSummary>>("/v1/contexts", {
+    query: { page_size: 100 },
+  });
+  return res.data.results;
+}
+
+export async function deleteContext(id: string): Promise<void> {
+  await call(`/v1/contexts/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
