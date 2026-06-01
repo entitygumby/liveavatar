@@ -227,17 +227,15 @@ export function InterviewStage({
         await session.start();
         log("session.start() ok");
         if (cancelled) return;
+        // Pass mode to start() too — the constructor's setMode and start()'s
+        // config both call setMode under the hood, but setMode complains if
+        // already set. Safer to rely on the constructor having set it.
         log("voiceChat.start() …");
         await session.voiceChat.start();
         log("voiceChat.start() ok — mic permission granted");
-        // Force unmute in case the SDK starts in a muted state (some
-        // versions do for PTT mode, expecting the PTT button to unmute).
-        try {
-          await session.voiceChat.unmute();
-          log("voiceChat.unmute() ok");
-        } catch (err) {
-          log("voiceChat.unmute() error (continuing anyway)", err);
-        }
+        // NOTE: Do NOT manually unmute here. In PTT mode the SDK expects to
+        // stay muted between PTT windows; startPushToTalk() does its own
+        // unmute when a window opens. The demo never calls unmute manually.
       } catch (err) {
         const m = err instanceof Error ? err.message : String(err);
         log("startup error", err);
@@ -286,12 +284,19 @@ export function InterviewStage({
     };
   }, [isPTT, isPushing]);
 
+  // Match the demo's exact order:
+  //   onClick={() => { startListening(); startPushToTalk(); }}
+  // Both are fire-and-forget; startListening is sync, startPushToTalk async.
   const handlePushStart = useCallback(() => {
     const session = sessionRef.current;
     if (!session) return;
     log("PTT start");
     setIsPushing(true);
-    // Start audio capture FIRST (Promise) — no await, capture begins immediately.
+    try {
+      session.startListening();
+    } catch (err) {
+      log("startListening error", err);
+    }
     session.voiceChat
       .startPushToTalk()
       .then(() => log("PTT capturing audio"))
@@ -300,12 +305,6 @@ export function InterviewStage({
         setErrorMsg(err instanceof Error ? err.message : String(err));
         setIsPushing(false);
       });
-    // startListening is SYNC (returns event_id string), so wrap in try/catch
-    try {
-      session.startListening();
-    } catch (err) {
-      log("startListening error", err);
-    }
   }, []);
 
   const handlePushStop = useCallback(() => {
