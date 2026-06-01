@@ -1,7 +1,14 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AddCustomVoice } from "./AddCustomVoice";
+import {
+  type AppSettings,
+  type InteractivityType,
+  loadSettings,
+  saveSettings,
+} from "@/lib/settings";
 
 type Avatar = {
   id: string;
@@ -20,37 +27,9 @@ type Voice = {
   gender?: string;
 };
 
-type Ctx = {
-  id: string;
-  name: string;
-  created_at: string;
-};
+type Ctx = { id: string; name: string; created_at: string };
 
 const NEW_CONTEXT_SENTINEL = "__new__";
-
-type Props = {
-  defaultPrompt: string;
-  defaultOpening: string;
-  defaultContextName: string;
-  defaultSpeakerTag: string;
-  onStart: (input: {
-    speakerTag: string;
-    avatarId?: string;
-    voiceId?: string;
-    contextId?: string;
-    contextName?: string;
-    prompt?: string;
-    openingText?: string;
-    panel?: string;
-    topic?: string;
-    sttProvider: string;
-    interactivityType: "PUSH_TO_TALK" | "CONVERSATIONAL";
-  }) => Promise<{
-    contextId?: string;
-    newContextCreated?: boolean;
-    updatedExistingContext?: boolean;
-  }>;
-};
 
 const STT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "deepgram", label: "Deepgram (recommended)" },
@@ -60,22 +39,26 @@ const STT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "", label: "Let LiveAvatar decide (default)" },
 ];
 
-export function SetupForm({
-  defaultPrompt,
-  defaultOpening,
-  defaultContextName,
-  defaultSpeakerTag,
-  onStart,
-}: Props) {
-  // Form state
-  const [contextChoice, setContextChoice] = useState<string>(NEW_CONTEXT_SENTINEL);
-  const [contextName, setContextName] = useState(defaultContextName);
-  const [prompt, setPrompt] = useState(defaultPrompt);
-  const [openingText, setOpeningText] = useState(defaultOpening);
-  const [panel, setPanel] = useState("");
-  const [topic, setTopic] = useState("");
-  const [speakerTag, setSpeakerTag] = useState(defaultSpeakerTag);
-  const [sttProvider, setSttProvider] = useState("deepgram");
+export function SettingsForm() {
+  const initial = useMemo(() => loadSettings(), []);
+
+  // Context choice maps to useExistingContext + contextId on save
+  const [contextChoice, setContextChoice] = useState<string>(
+    initial.useExistingContext && initial.contextId
+      ? initial.contextId
+      : NEW_CONTEXT_SENTINEL,
+  );
+  const [contextName, setContextName] = useState(initial.contextName);
+  const [prompt, setPrompt] = useState(initial.prompt);
+  const [openingText, setOpeningText] = useState(initial.openingText);
+  const [panel, setPanel] = useState(initial.panel);
+  const [topic, setTopic] = useState(initial.topic);
+  const [speakerTag, setSpeakerTag] = useState(initial.speakerTag);
+  const [sttProvider, setSttProvider] = useState(initial.sttProvider);
+  const [interactivityType, setInteractivityType] =
+    useState<InteractivityType>(initial.interactivityType);
+  const [avatarId, setAvatarId] = useState(initial.avatarId);
+  const [voiceId, setVoiceId] = useState(initial.voiceId);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Lookups
@@ -87,27 +70,7 @@ export function SetupForm({
   const [voicesErr, setVoicesErr] = useState<string | null>(null);
   const [contextsErr, setContextsErr] = useState<string | null>(null);
 
-  // Selections
-  const [avatarId, setAvatarId] = useState<string>("");
-  const [voiceId, setVoiceId] = useState<string>("");
-  const [interactivityType, setInteractivityType] = useState<
-    "PUSH_TO_TALK" | "CONVERSATIONAL"
-  >(() => {
-    // Allow URL override: /?mode=voice or /?mode=ptt
-    if (typeof window !== "undefined") {
-      const m = new URLSearchParams(window.location.search)
-        .get("mode")
-        ?.toLowerCase();
-      if (m === "voice" || m === "vad" || m === "conversational")
-        return "CONVERSATIONAL";
-      if (m === "ptt" || m === "push") return "PUSH_TO_TALK";
-    }
-    return "PUSH_TO_TALK";
-  });
-
-  // UX
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   const refreshVoices = useCallback(async () => {
     try {
@@ -116,13 +79,8 @@ export function SetupForm({
       if (!res.ok) throw new Error(body?.error || `Failed (${res.status})`);
       setPrivateVoices(body.private || []);
       setPublicVoices(body.public || []);
-      return {
-        privateVoices: (body.private as Voice[]) || [],
-        publicVoices: (body.public as Voice[]) || [],
-      };
     } catch (err) {
       setVoicesErr(err instanceof Error ? err.message : String(err));
-      return { privateVoices: [], publicVoices: [] };
     }
   }, []);
 
@@ -137,38 +95,35 @@ export function SetupForm({
     }
   }, []);
 
-  // Fetch avatars, voices, contexts on mount
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
       try {
         const res = await fetch("/api/avatars");
         const body = await res.json();
         if (!res.ok) throw new Error(body?.error || `Failed (${res.status})`);
-        if (!cancelled) {
-          const active = (body.avatars as Avatar[]).filter(
-            (a) => a.status === "ACTIVE",
-          );
-          setAvatars(active);
-          if (active.length > 0) {
-            setAvatarId(active[0].id);
-            const dv = active[0].default_voice?.id;
-            if (dv) setVoiceId(dv);
-          }
+        if (cancelled) return;
+        const active = (body.avatars as Avatar[]).filter(
+          (a) => a.status === "ACTIVE",
+        );
+        setAvatars(active);
+        // If no avatar saved yet, default to the first one + its voice
+        if (!avatarId && active.length > 0) {
+          setAvatarId(active[0].id);
+          const dv = active[0].default_voice?.id;
+          if (dv && !voiceId) setVoiceId(dv);
         }
       } catch (err) {
         if (!cancelled)
           setAvatarsErr(err instanceof Error ? err.message : String(err));
       }
     })();
-
     refreshVoices();
     refreshContexts();
-
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshVoices, refreshContexts]);
 
   const handleCustomVoiceAdded = useCallback(
@@ -188,41 +143,27 @@ export function SetupForm({
 
   const usingExistingContext =
     contextChoice !== NEW_CONTEXT_SENTINEL && contextChoice !== "";
+  const selectedContext = contexts?.find((c) => c.id === contextChoice);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    if (voiceMissing) {
-      setError(
-        "This is an image avatar — please pick a voice (image avatars have no built-in voice).",
-      );
-      return;
-    }
-    setBusy(true);
-    try {
-      const result = await onStart({
-        speakerTag,
-        avatarId: avatarId || undefined,
-        voiceId: voiceId || undefined,
-        contextId: usingExistingContext ? contextChoice : undefined,
-        contextName: usingExistingContext ? undefined : contextName,
-        prompt: usingExistingContext ? undefined : prompt,
-        openingText: usingExistingContext ? undefined : openingText,
-        panel: usingExistingContext ? undefined : panel,
-        topic: usingExistingContext ? undefined : topic,
-        sttProvider,
-        interactivityType,
-      });
-      // Refresh the list when a context was created or updated, so the
-      // dropdown reflects the latest state.
-      if (result?.newContextCreated || result?.updatedExistingContext) {
-        await refreshContexts();
-      }
-    } catch (err) {
-      const m = err instanceof Error ? err.message : String(err);
-      setError(m);
-      setBusy(false);
-    }
+    const next: AppSettings = {
+      avatarId,
+      voiceId,
+      useExistingContext: usingExistingContext,
+      contextId: usingExistingContext ? contextChoice : "",
+      contextName,
+      prompt,
+      openingText,
+      panel,
+      topic,
+      sttProvider,
+      interactivityType,
+      speakerTag,
+    };
+    saveSettings(next);
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 2500);
   }
 
   async function handleDeleteContext(id: string, name: string) {
@@ -236,79 +177,34 @@ export function SetupForm({
       if (contextChoice === id) setContextChoice(NEW_CONTEXT_SENTINEL);
       await refreshContexts();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setContextsErr(err instanceof Error ? err.message : String(err));
     }
   }
 
-  const selectedContext = contexts?.find((c) => c.id === contextChoice);
-
   return (
     <form
-      onSubmit={handleSubmit}
+      onSubmit={handleSave}
       className="w-full max-w-2xl mx-auto px-4 py-10 flex flex-col gap-6"
     >
       <header className="space-y-2">
-        <h1 className="text-3xl font-semibold">Panel Interview</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-semibold">Settings</h1>
+          <Link
+            href="/"
+            className="text-sm text-zinc-400 hover:text-zinc-200 underline"
+          >
+            ← Launcher
+          </Link>
+        </div>
         <p className="text-sm text-zinc-400">
-          One AI avatar moderates; multiple humans take turns. Pick your avatar,
-          voice, context, and how you want to talk.
+          Configure the avatar, voice, moderator persona, and conversation once.
+          The launcher uses these so people don&apos;t pick them every time.
+          Saved in this browser.
         </p>
       </header>
 
       <Field
-        label="How do you want to talk?"
-        hint={
-          interactivityType === "PUSH_TO_TALK"
-            ? "Hold a button (or spacebar) to talk; release to send. Best for shared-mic panels."
-            : "Just talk — the avatar listens continuously and replies when you pause. Try this if PTT isn't capturing audio."
-        }
-      >
-        <div className="flex gap-2">
-          <label
-            className={`flex-1 cursor-pointer rounded-lg border px-4 py-3 text-sm transition-colors ${
-              interactivityType === "PUSH_TO_TALK"
-                ? "border-white/40 bg-white/10 text-white"
-                : "border-white/10 bg-zinc-900 hover:bg-white/5 text-zinc-300"
-            }`}
-          >
-            <input
-              type="radio"
-              name="interactivity"
-              value="PUSH_TO_TALK"
-              checked={interactivityType === "PUSH_TO_TALK"}
-              onChange={() => setInteractivityType("PUSH_TO_TALK")}
-              className="sr-only"
-            />
-            <span className="font-medium">Push-to-talk</span>
-            <span className="block text-xs text-zinc-500 mt-0.5">
-              Hold space / button to speak
-            </span>
-          </label>
-          <label
-            className={`flex-1 cursor-pointer rounded-lg border px-4 py-3 text-sm transition-colors ${
-              interactivityType === "CONVERSATIONAL"
-                ? "border-white/40 bg-white/10 text-white"
-                : "border-white/10 bg-zinc-900 hover:bg-white/5 text-zinc-300"
-            }`}
-          >
-            <input
-              type="radio"
-              name="interactivity"
-              value="CONVERSATIONAL"
-              checked={interactivityType === "CONVERSATIONAL"}
-              onChange={() => setInteractivityType("CONVERSATIONAL")}
-              className="sr-only"
-            />
-            <span className="font-medium">Continuous voice (VAD)</span>
-            <span className="block text-xs text-zinc-500 mt-0.5">
-              Just talk — avatar listens always
-            </span>
-          </label>
-        </div>
-      </Field>
-
-      <Field
-        label="Avatar"
+        label="Default avatar"
         hint={
           avatarsErr
             ? `Couldn't load: ${avatarsErr}`
@@ -316,7 +212,7 @@ export function SetupForm({
               ? "Loading from your account…"
               : avatars.length === 0
                 ? "No active avatars found. Create one at app.liveavatar.com."
-                : `${avatars.length} active avatar${avatars.length === 1 ? "" : "s"} in your account.`
+                : "The avatar the launcher opens with."
         }
       >
         <select
@@ -331,6 +227,7 @@ export function SetupForm({
           disabled={!avatars || avatars.length === 0}
           className="w-full rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm focus:outline-none focus:border-white/30 disabled:opacity-50"
         >
+          <option value="">— first active avatar —</option>
           {avatars?.map((a) => (
             <option key={a.id} value={a.id}>
               {a.name} — {a.type === "IMAGE" ? "image" : "video"}
@@ -338,6 +235,7 @@ export function SetupForm({
           ))}
         </select>
         {selectedAvatar?.preview_url && (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={selectedAvatar.preview_url}
             alt={selectedAvatar.name}
@@ -352,7 +250,7 @@ export function SetupForm({
           voicesErr
             ? `Couldn't load: ${voicesErr}`
             : voiceRequired
-              ? "Image avatars have no built-in voice — picking one is required."
+              ? "Image avatars have no built-in voice — pick the one you paired (e.g. your ElevenLabs clone)."
               : "Optional for video avatars; the avatar's default voice is used if blank."
         }
       >
@@ -363,7 +261,7 @@ export function SetupForm({
             voiceMissing ? "border-red-500/60" : "border-white/10"
           }`}
         >
-          <option value="">— pick a voice —</option>
+          <option value="">— use avatar default —</option>
           {privateVoices.length > 0 && (
             <optgroup label="Your voices">
               {privateVoices.map((v) => (
@@ -389,15 +287,53 @@ export function SetupForm({
       </Field>
 
       <Field
-        label="Conversation setup"
+        label="How people talk to the avatar"
+        hint={
+          interactivityType === "PUSH_TO_TALK"
+            ? "Hold space/button to talk; release to send. Best for shared-mic panels."
+            : "Just talk — the avatar listens continuously and replies when you pause."
+        }
+      >
+        <div className="flex gap-2">
+          {(
+            [
+              ["PUSH_TO_TALK", "Push-to-talk", "Hold space / button"],
+              ["CONVERSATIONAL", "Continuous voice", "Just talk"],
+            ] as const
+          ).map(([val, label, sub]) => (
+            <label
+              key={val}
+              className={`flex-1 cursor-pointer rounded-lg border px-4 py-3 text-sm transition-colors ${
+                interactivityType === val
+                  ? "border-white/40 bg-white/10 text-white"
+                  : "border-white/10 bg-zinc-900 hover:bg-white/5 text-zinc-300"
+              }`}
+            >
+              <input
+                type="radio"
+                name="interactivity"
+                value={val}
+                checked={interactivityType === val}
+                onChange={() => setInteractivityType(val)}
+                className="sr-only"
+              />
+              <span className="font-medium">{label}</span>
+              <span className="block text-xs text-zinc-500 mt-0.5">{sub}</span>
+            </label>
+          ))}
+        </div>
+      </Field>
+
+      <Field
+        label="Conversation"
         hint={
           contextsErr
             ? `Couldn't load saved contexts: ${contextsErr}`
             : contexts === null
               ? "Loading saved contexts…"
               : usingExistingContext
-                ? "Reusing a saved context exactly as you saved it."
-                : "Fill in the panel and topic below. Saved (and re-saved with your latest edits) under the name you choose."
+                ? "Using a saved context as-is."
+                : "Built from the panel + topic below and saved under the name you choose."
         }
       >
         <div className="flex gap-2">
@@ -407,7 +343,7 @@ export function SetupForm({
             className="flex-1 rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm focus:outline-none focus:border-white/30"
           >
             <option value={NEW_CONTEXT_SENTINEL}>
-              + Create new context from fields below
+              + Build from panel + topic below
             </option>
             {contexts && contexts.length > 0 && (
               <optgroup label="Saved contexts">
@@ -426,7 +362,6 @@ export function SetupForm({
                 handleDeleteContext(selectedContext.id, selectedContext.name)
               }
               className="px-3 rounded-lg border border-red-500/30 text-red-300 text-xs hover:bg-red-500/10"
-              title="Delete this saved context"
             >
               Delete
             </button>
@@ -437,8 +372,8 @@ export function SetupForm({
       {!usingExistingContext && (
         <>
           <Field
-            label="Who's on the panel? (optional but recommended)"
-            hint="Tell the avatar who's here so it doesn't ask for introductions. One per line or comma-separated, e.g. 'Alice – Product lead, Bob – Senior engineer, Carol – Designer'."
+            label="Who's on the panel? (recommended)"
+            hint="So the avatar doesn't ask for introductions. e.g. 'Alice – Product lead, Bob – Senior engineer, Carol – Designer'."
           >
             <textarea
               value={panel}
@@ -451,7 +386,7 @@ export function SetupForm({
 
           <Field
             label="What's the conversation about? (optional)"
-            hint="Keeps the avatar on-topic and primes it for the right vocabulary."
+            hint="Keeps the avatar on-topic and primes the right vocabulary."
           >
             <input
               value={topic}
@@ -462,8 +397,8 @@ export function SetupForm({
           </Field>
 
           <Field
-            label="Save this setup as"
-            hint="Name for the saved context. Re-using this name updates it with your latest edits."
+            label="Save conversation as"
+            hint="Re-using this name updates the saved context with your latest edits."
           >
             <input
               value={contextName}
@@ -485,7 +420,7 @@ export function SetupForm({
             <>
               <Field
                 label="Moderator persona prompt"
-                hint="The base behaviour. Your panel + topic above are appended automatically."
+                hint="The base behaviour. Panel + topic above are appended automatically."
               >
                 <textarea
                   value={prompt}
@@ -513,7 +448,7 @@ export function SetupForm({
 
       <Field
         label="Speech recognition (ASR)"
-        hint="Which engine transcribes what people say. If the avatar mishears, try a different one — Deepgram is a strong default."
+        hint="Which engine transcribes speech. If the avatar mishears, try a different one."
       >
         <select
           value={sttProvider}
@@ -529,8 +464,8 @@ export function SetupForm({
       </Field>
 
       <Field
-        label="Default speaker tag (optional)"
-        hint="Used to label each transcript line so you can tell panelists apart later."
+        label="Transcript speaker tag (optional)"
+        hint="Labels each transcript line so you can tell panelists apart later."
       >
         <input
           value={speakerTag}
@@ -540,19 +475,23 @@ export function SetupForm({
         />
       </Field>
 
-      {error && (
-        <p className="text-red-300 text-sm bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-lg">
-          {error}
-        </p>
-      )}
-
-      <button
-        type="submit"
-        disabled={busy || !avatars || avatars.length === 0}
-        className="self-start px-5 py-2.5 rounded-lg bg-white text-black text-sm font-medium hover:bg-zinc-100 disabled:opacity-50 transition-colors"
-      >
-        {busy ? "Starting…" : "Start session"}
-      </button>
+      <div className="flex items-center gap-3 sticky bottom-4">
+        <button
+          type="submit"
+          className="px-5 py-2.5 rounded-lg bg-white text-black text-sm font-medium hover:bg-zinc-100 transition-colors"
+        >
+          Save settings
+        </button>
+        <Link
+          href="/"
+          className="px-5 py-2.5 rounded-lg border border-white/15 text-sm hover:bg-white/5 transition-colors"
+        >
+          Done
+        </Link>
+        {saved && (
+          <span className="text-sm text-green-300">Saved ✓</span>
+        )}
+      </div>
     </form>
   );
 }

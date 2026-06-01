@@ -44,6 +44,17 @@ A Next.js + TypeScript app where **one AI avatar moderates a group interview** w
    ```
    Open http://localhost:3000.
 
+## Two screens: Launcher + Settings
+
+| Route | Purpose |
+|-------|---------|
+| `/` (Launcher) | Minimal. Shows the configured avatar, lets you pick it (dropdown only if you have several), and **Start**. Everything else comes from saved settings. |
+| `/settings` | Manage it all once: default avatar, voice (incl. binding a custom ElevenLabs voice), moderator persona, panel roster, topic, ASR engine, talk mode. |
+
+**Settings are saved in the browser** (`localStorage`, key `liveavatar.settings.v1`) — configure once on the machine that hosts the demo, and the launcher reuses them. The `/api/session` route still falls back to env vars (`LIVEAVATAR_AVATAR_ID`, `LIVEAVATAR_VOICE_ID`, `LIVEAVATAR_CONTEXT_ID`) so a visitor with no saved settings still launches with sensible server-side defaults.
+
+Voice resolution at launch: **saved `voiceId` → the avatar's paired `default_voice` → env fallback**. So if your image avatar is paired with your ElevenLabs clone as its default voice, the launcher needs no voice pick at all.
+
 ## Sandbox vs Production
 
 | Mode | What you get | Cost |
