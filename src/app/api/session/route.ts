@@ -1,23 +1,38 @@
 import { NextResponse } from "next/server";
 import {
   SANDBOX_AVATAR_ID,
+  type SttProvider,
   createContext,
   createSessionToken,
   listContexts,
+  updateContext,
 } from "@/lib/liveavatar-server";
-import { DEFAULT_INTERVIEW_CONTEXT } from "@/lib/interview-defaults";
+import {
+  DEFAULT_INTERVIEW_CONTEXT,
+  buildModeratorPrompt,
+} from "@/lib/interview-defaults";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const STT_PROVIDERS: SttProvider[] = [
+  "deepgram",
+  "assembly_ai",
+  "gladia",
+  "elevenlabs",
+];
 
 type RequestBody = {
   contextId?: string;
   prompt?: string;
   openingText?: string;
   contextName?: string;
+  panel?: string;
+  topic?: string;
   avatarId?: string;
   voiceId?: string;
   interactivityType?: "PUSH_TO_TALK" | "CONVERSATIONAL";
+  sttProvider?: string;
 };
 
 export async function POST(req: Request) {
@@ -50,39 +65,51 @@ export async function POST(req: Request) {
       process.env.LIVEAVATAR_VOICE_ID ||
       undefined;
 
+    // Compose the effective prompt: the (possibly edited) persona prompt plus
+    // a grounding block built from the panel roster + topic. This is what
+    // actually stops the avatar asking for introductions.
+    const effectivePrompt = buildModeratorPrompt({
+      basePrompt: body.prompt ?? DEFAULT_INTERVIEW_CONTEXT.prompt,
+      panel: body.panel,
+      topic: body.topic,
+    });
+    const effectiveOpening =
+      body.openingText ?? DEFAULT_INTERVIEW_CONTEXT.opening_text;
+
     // Context resolution order:
-    //   1. explicit contextId in request (user picked a saved one)
+    //   1. explicit contextId in request (user picked a saved one — used as-is)
     //   2. LIVEAVATAR_CONTEXT_ID env var (pinned default)
-    //   3. reuse an existing context with the same name (idempotent)
-    //   4. create a new context from prompt/openingText
+    //   3. existing context with the same name → PATCH it so prompt edits
+    //      actually apply (avoids the stale-prompt + 4000-conflict traps)
+    //   4. create a fresh context
     let contextId: string | null =
       body.contextId || process.env.LIVEAVATAR_CONTEXT_ID || null;
     let newContextCreated = false;
-    let reusedExistingContext = false;
+    let updatedExistingContext = false;
 
     if (!contextId) {
-      const wantName = body.contextName ?? DEFAULT_INTERVIEW_CONTEXT.name;
+      const wantName = body.contextName?.trim() || DEFAULT_INTERVIEW_CONTEXT.name;
+      const contextPayload = {
+        name: wantName,
+        prompt: effectivePrompt,
+        opening_text: effectiveOpening,
+      };
 
-      // Reuse an existing context with the same name if one is there.
-      // This makes repeat sessions cheap and avoids the 4000 conflict.
+      let existingId: string | null = null;
       try {
         const existing = await listContexts();
-        const match = existing.find((c) => c.name === wantName);
-        if (match) {
-          contextId = match.id;
-          reusedExistingContext = true;
-        }
+        existingId = existing.find((c) => c.name === wantName)?.id ?? null;
       } catch {
-        // If listing fails, fall through and try to create anyway.
+        // listing failed — fall through to create
       }
 
-      if (!contextId) {
-        const ctx = await createContext({
-          name: wantName,
-          prompt: body.prompt ?? DEFAULT_INTERVIEW_CONTEXT.prompt,
-          opening_text:
-            body.openingText ?? DEFAULT_INTERVIEW_CONTEXT.opening_text,
-        });
+      if (existingId) {
+        // Apply the latest prompt/opening to the existing context in place.
+        await updateContext(existingId, contextPayload);
+        contextId = existingId;
+        updatedExistingContext = true;
+      } else {
+        const ctx = await createContext(contextPayload);
         contextId = ctx.data.id;
         newContextCreated = true;
       }
@@ -90,9 +117,13 @@ export async function POST(req: Request) {
 
     const interactivity = body.interactivityType ?? "PUSH_TO_TALK";
 
-    // Match the official demo's pattern: only send interactivity_type when
-    // PTT is wanted. CONVERSATIONAL is the server default — sending it
-    // explicitly used to 422 in the past, so we conditionally spread.
+    const sttProvider =
+      body.sttProvider && STT_PROVIDERS.includes(body.sttProvider as SttProvider)
+        ? (body.sttProvider as SttProvider)
+        : undefined;
+
+    // Match the official demo: only send interactivity_type when PTT is wanted.
+    // CONVERSATIONAL is the server default and was rejected when sent explicitly.
     const token = await createSessionToken({
       mode: "FULL",
       avatar_id: avatarId,
@@ -100,6 +131,7 @@ export async function POST(req: Request) {
         voice_id: voiceId,
         context_id: contextId,
         language: "en",
+        ...(sttProvider ? { stt_config: { provider: sttProvider } } : {}),
       },
       is_sandbox: sandbox,
       ...(interactivity === "PUSH_TO_TALK"
@@ -114,8 +146,9 @@ export async function POST(req: Request) {
       sandbox,
       contextId,
       newContextCreated,
-      reusedExistingContext,
+      updatedExistingContext,
       interactivityType: interactivity,
+      sttProvider: sttProvider ?? null,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

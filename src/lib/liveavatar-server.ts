@@ -13,7 +13,7 @@ function apiKey(): string {
 }
 
 type FetchOpts = {
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   auth?: { bearer: string } | { apiKey: true };
   query?: Record<string, string | number | boolean | undefined>;
@@ -57,17 +57,33 @@ export type ContextResponse = {
   data: { id: string; name: string };
 };
 
-export async function createContext(input: {
+export type ContextInput = {
   name: string;
   prompt: string;
   opening_text: string;
   links?: Array<{ url: string; faq: string }>;
-}): Promise<ContextResponse> {
+};
+
+export async function createContext(
+  input: ContextInput,
+): Promise<ContextResponse> {
   return call<ContextResponse>("/v1/contexts", {
     method: "POST",
     body: input,
   });
 }
+
+export async function updateContext(
+  id: string,
+  input: ContextInput,
+): Promise<ContextResponse> {
+  return call<ContextResponse>(`/v1/contexts/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: input,
+  });
+}
+
+export type SttProvider = "deepgram" | "assembly_ai" | "gladia" | "elevenlabs";
 
 export type SessionTokenResponse = {
   data: { session_id: string; session_token: string };
@@ -76,7 +92,12 @@ export type SessionTokenResponse = {
 export async function createSessionToken(input: {
   mode: "FULL";
   avatar_id: string;
-  avatar_persona: { voice_id?: string; context_id?: string; language: string };
+  avatar_persona: {
+    voice_id?: string;
+    context_id?: string;
+    language: string;
+    stt_config?: { provider: SttProvider };
+  };
   is_sandbox?: boolean;
   interactivity_type?: "PUSH_TO_TALK" | "CONVERSATIONAL";
   video_quality?: "very_high" | "high" | "medium" | "low";

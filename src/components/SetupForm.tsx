@@ -41,9 +41,24 @@ type Props = {
     contextName?: string;
     prompt?: string;
     openingText?: string;
+    panel?: string;
+    topic?: string;
+    sttProvider: string;
     interactivityType: "PUSH_TO_TALK" | "CONVERSATIONAL";
-  }) => Promise<{ contextId?: string; newContextCreated?: boolean }>;
+  }) => Promise<{
+    contextId?: string;
+    newContextCreated?: boolean;
+    updatedExistingContext?: boolean;
+  }>;
 };
+
+const STT_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "deepgram", label: "Deepgram (recommended)" },
+  { value: "assembly_ai", label: "AssemblyAI" },
+  { value: "gladia", label: "Gladia" },
+  { value: "elevenlabs", label: "ElevenLabs" },
+  { value: "", label: "Let LiveAvatar decide (default)" },
+];
 
 export function SetupForm({
   defaultPrompt,
@@ -57,7 +72,11 @@ export function SetupForm({
   const [contextName, setContextName] = useState(defaultContextName);
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [openingText, setOpeningText] = useState(defaultOpening);
+  const [panel, setPanel] = useState("");
+  const [topic, setTopic] = useState("");
   const [speakerTag, setSpeakerTag] = useState(defaultSpeakerTag);
+  const [sttProvider, setSttProvider] = useState("deepgram");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Lookups
   const [avatars, setAvatars] = useState<Avatar[] | null>(null);
@@ -189,11 +208,14 @@ export function SetupForm({
         contextName: usingExistingContext ? undefined : contextName,
         prompt: usingExistingContext ? undefined : prompt,
         openingText: usingExistingContext ? undefined : openingText,
+        panel: usingExistingContext ? undefined : panel,
+        topic: usingExistingContext ? undefined : topic,
+        sttProvider,
         interactivityType,
       });
-      // If a new context was just created, refresh the list so the user
-      // sees their new context in the dropdown next time.
-      if (result?.newContextCreated) {
+      // Refresh the list when a context was created or updated, so the
+      // dropdown reflects the latest state.
+      if (result?.newContextCreated || result?.updatedExistingContext) {
         await refreshContexts();
       }
     } catch (err) {
@@ -367,15 +389,15 @@ export function SetupForm({
       </Field>
 
       <Field
-        label="Context (system prompt + opening line)"
+        label="Conversation setup"
         hint={
           contextsErr
             ? `Couldn't load saved contexts: ${contextsErr}`
             : contexts === null
               ? "Loading saved contexts…"
               : usingExistingContext
-                ? "Using a saved context. The session will use the prompt and opening line you saved before."
-                : "Tune the prompt below — saved on first use so you can reuse it later."
+                ? "Reusing a saved context exactly as you saved it."
+                : "Fill in the panel and topic below. Saved (and re-saved with your latest edits) under the name you choose."
         }
       >
         <div className="flex gap-2">
@@ -415,8 +437,33 @@ export function SetupForm({
       {!usingExistingContext && (
         <>
           <Field
-            label="Context name"
-            hint="Used to identify this context later in the saved-contexts dropdown."
+            label="Who's on the panel? (optional but recommended)"
+            hint="Tell the avatar who's here so it doesn't ask for introductions. One per line or comma-separated, e.g. 'Alice – Product lead, Bob – Senior engineer, Carol – Designer'."
+          >
+            <textarea
+              value={panel}
+              onChange={(e) => setPanel(e.target.value)}
+              rows={3}
+              placeholder="Alice – Product lead, Bob – Senior engineer, Carol – Designer"
+              className="w-full rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm focus:outline-none focus:border-white/30"
+            />
+          </Field>
+
+          <Field
+            label="What's the conversation about? (optional)"
+            hint="Keeps the avatar on-topic and primes it for the right vocabulary."
+          >
+            <input
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="e.g. Interviewing candidates for a senior PM role"
+              className="w-full rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm focus:outline-none focus:border-white/30"
+            />
+          </Field>
+
+          <Field
+            label="Save this setup as"
+            hint="Name for the saved context. Re-using this name updates it with your latest edits."
           >
             <input
               value={contextName}
@@ -425,31 +472,61 @@ export function SetupForm({
             />
           </Field>
 
-          <Field
-            label="Moderator system prompt"
-            hint="Defines the avatar's role, tone, and rules."
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="self-start text-xs text-zinc-400 hover:text-zinc-200"
           >
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={10}
-              className="w-full rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm leading-relaxed focus:outline-none focus:border-white/30"
-            />
-          </Field>
+            {showAdvanced ? "▾ Hide" : "▸ Show"} advanced: moderator persona &
+            opening line
+          </button>
 
-          <Field
-            label="Opening line"
-            hint="The first thing the avatar will say when it joins."
-          >
-            <textarea
-              value={openingText}
-              onChange={(e) => setOpeningText(e.target.value)}
-              rows={3}
-              className="w-full rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm focus:outline-none focus:border-white/30"
-            />
-          </Field>
+          {showAdvanced && (
+            <>
+              <Field
+                label="Moderator persona prompt"
+                hint="The base behaviour. Your panel + topic above are appended automatically."
+              >
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  rows={12}
+                  className="w-full rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm leading-relaxed focus:outline-none focus:border-white/30 font-mono"
+                />
+              </Field>
+
+              <Field
+                label="Opening line"
+                hint="The first thing the avatar says when it joins."
+              >
+                <textarea
+                  value={openingText}
+                  onChange={(e) => setOpeningText(e.target.value)}
+                  rows={3}
+                  className="w-full rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm focus:outline-none focus:border-white/30"
+                />
+              </Field>
+            </>
+          )}
         </>
       )}
+
+      <Field
+        label="Speech recognition (ASR)"
+        hint="Which engine transcribes what people say. If the avatar mishears, try a different one — Deepgram is a strong default."
+      >
+        <select
+          value={sttProvider}
+          onChange={(e) => setSttProvider(e.target.value)}
+          className="w-full rounded-lg bg-zinc-900 border border-white/10 px-3 py-2 text-sm focus:outline-none focus:border-white/30"
+        >
+          {STT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </Field>
 
       <Field
         label="Default speaker tag (optional)"

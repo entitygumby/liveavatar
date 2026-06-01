@@ -99,21 +99,55 @@ never logs or persists them.
 | Save a new key | `POST /v1/secrets` | `POST /api/provider-keys` |
 | Bind voice | `POST /v1/voices/third_party` | `POST /api/voices/bind` |
 
-## Customising the moderator (reusable contexts)
+## Conversation quality (the part that makes it feel natural)
 
-The setup form has a **Context** dropdown:
+Two settings drive whether the avatar feels like a real moderator or a confused stranger:
 
-- **+ Create new context from fields below** (default) — type a name, prompt, and opening line. On submit, the API creates a context, returns its ID, and the session uses it. The dropdown refreshes automatically, so the new context is available next time.
-- **Saved contexts** — pick one and the prompt/opening fields disappear; the session uses the saved context directly (no `POST /v1/contexts` call).
-- **Delete** — removes the selected context via `DELETE /v1/contexts/{id}`.
+### Panel roster + topic — stops the "who are you?" loop
 
-You can also pin a context via `LIVEAVATAR_CONTEXT_ID` in `.env.local`. The resolution order in `/api/session` is:
+In FULL Mode there is **one shared audio channel**. The avatar physically cannot tell speakers apart by voice. If the prompt tells it to identify speakers, it loops forever asking people to introduce themselves.
 
-1. `contextId` from the form (user picked a saved one)
+The fix is to *tell it who's there up front*:
+
+- **Who's on the panel?** — e.g. `Alice – Product lead, Bob – Senior engineer, Carol – Designer`
+- **What's the conversation about?** — e.g. `Interviewing candidates for a senior PM role`
+
+These are appended to the system prompt as a grounding block (`buildModeratorPrompt` in `src/lib/interview-defaults.ts`). The base prompt also explicitly tells the avatar it's a single audio channel, to never re-ask for introductions, and to ask a brief clarifying question when transcription looks garbled instead of guessing.
+
+### Speech recognition (ASR) — fixes mishearing
+
+The session token accepts `avatar_persona.stt_config.provider`. The form exposes a dropdown:
+
+| Provider | Notes |
+|----------|-------|
+| **Deepgram** (default) | Strong general-purpose ASR — try this first if the avatar mishears |
+| AssemblyAI | Alternative; good with accents/domain terms |
+| Gladia | Alternative |
+| ElevenLabs | Alternative |
+| Let LiveAvatar decide | Sends no `stt_config` — the platform default (use if a provider errors on your plan) |
+
+### Reusable contexts
+
+The **Conversation setup** dropdown lets you reuse a saved context, or create/update one:
+
+- **+ Create new** — fill panel/topic (and optionally edit the persona prompt under "Advanced"). On submit the context is saved under the name you choose.
+- **Editing applies in place.** Re-using the same name **PATCHes** the existing context (`PATCH /v1/contexts/{id}`) with your latest prompt/opening — so edits actually take effect instead of silently reusing a stale version.
+- **Saved contexts** — pick one to reuse it exactly as saved (no create/update call).
+- **Delete** — removes it via `DELETE /v1/contexts/{id}`.
+
+Context resolution order in `/api/session`:
+
+1. `contextId` from the form (saved pick — used as-is)
 2. `LIVEAVATAR_CONTEXT_ID` env var
-3. Create a new one from the prompt/opening fields
+3. Existing context with the same name → **PATCH** to apply edits → reuse
+4. Create a fresh context
 
-Default values for the prompt and opening line live in `src/lib/interview-defaults.ts`.
+Defaults for the prompt and opening line live in `src/lib/interview-defaults.ts`.
+
+### Interactivity mode
+
+- **Push-to-talk** — `interactivity_type: "PUSH_TO_TALK"` on the token + `{ mode: SessionInteractivityMode.PUSH_TO_TALK }` on the SDK. Hold space/button to talk. The SDK and server mode **must match** or the mic never opens.
+- **Continuous voice (VAD)** — field omitted on the token (server default `CONVERSATIONAL`) + `voiceChat: true` on the SDK. Just talk.
 
 ## Gotchas
 
@@ -122,7 +156,8 @@ Default values for the prompt and opening line live in `src/lib/interview-defaul
 3. **Never leak `LIVEAVATAR_API_KEY` to the browser.** Only server-side files (`src/lib/liveavatar-server.ts` and `src/app/api/*`) read it. Adding `"server-only"` at the top throws at build time if it's accidentally imported in a client component.
 4. **Image avatars require `voice_id`.** Video avatars can omit it.
 5. **5-minute idle timeout.** Keep-alive runs every 2 minutes from the client while the session is connected.
-6. **Multi-human note.** Everyone shares one browser session and one mic. The avatar treats all input as "the user"; the moderator prompt instructs it to ask for identification when ambiguity matters. For per-panelist tracking, extend the speaker-tag selector in `InterviewStage.tsx` and prefix transcripts before sending them to your own analytics.
+6. **One audio channel — the avatar can't tell speakers apart.** Everyone shares one mic; all input reaches the LLM as one stream. Don't prompt it to identify speakers by voice (it can't) — instead give it the panel roster up front via the form. For per-panelist *transcript* tracking, extend the speaker-tag selector in `InterviewStage.tsx`.
+7. **SDK voiceChat mode must match the token's `interactivity_type`.** PTT token + continuous SDK config (or vice-versa) = mic never opens, no error. See `InterviewStage.tsx` and `/api/session`.
 
 ## Files
 

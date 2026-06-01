@@ -24,6 +24,9 @@ export default function HomePage() {
       contextName?: string;
       prompt?: string;
       openingText?: string;
+      panel?: string;
+      topic?: string;
+      sttProvider: string;
       interactivityType: "PUSH_TO_TALK" | "CONVERSATIONAL";
     }) => {
       const res = await fetch("/api/session", {
@@ -36,6 +39,9 @@ export default function HomePage() {
           contextName: input.contextName,
           prompt: input.prompt,
           openingText: input.openingText,
+          panel: input.panel,
+          topic: input.topic,
+          sttProvider: input.sttProvider,
           interactivityType: input.interactivityType,
         }),
       });
@@ -52,6 +58,7 @@ export default function HomePage() {
       return {
         contextId: body.contextId as string | undefined,
         newContextCreated: !!body.newContextCreated,
+        updatedExistingContext: !!body.updatedExistingContext,
       };
     },
     [],
