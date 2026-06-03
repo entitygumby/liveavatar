@@ -1,164 +1,110 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Props {
+  /** Voice chat is active (mic permission granted via the SDK). */
   enabled: boolean;
+  /** SDK speech-detection state — drives the "hearing you" indicator. */
+  isUserTalking: boolean;
+  /** Called with a deviceId when the user picks a different microphone. */
   onDeviceChange?: (deviceId: string) => void;
 }
 
 /**
- * Live mic-level meter + device picker. Independent of the LiveAvatar SDK so
- * we can confirm that the browser sees mic input even if the SDK pipeline
- * is broken further downstream.
+ * Microphone picker + live "hearing you" indicator.
+ *
+ * IMPORTANT: this component does NOT open its own getUserMedia stream. The
+ * LiveAvatar SDK already owns the microphone, and grabbing a second stream for
+ * the same device throws "NotReadableError / device in use" on Windows — which
+ * previously showed a mic error and broke device selection. We enumerate
+ * devices (labels are available once the SDK has been granted permission) and
+ * route changes through the SDK's own setDevice().
  */
-export function MicDiagnostics({ enabled, onDeviceChange }: Props) {
-  const [level, setLevel] = useState(0);
+export function MicDiagnostics({
+  enabled,
+  isUserTalking,
+  onDeviceChange,
+}: Props) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDevice, setSelectedDevice] = useState<string>("default");
-  const [err, setErr] = useState<string | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<string>("");
 
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number | null>(null);
-
-  // Enumerate devices (labels populate only after first getUserMedia grant)
-  useEffect(() => {
-    if (!enabled) return;
-    const updateDevices = async () => {
-      try {
-        const list = await navigator.mediaDevices.enumerateDevices();
-        setDevices(
-          list.filter((d) => d.kind === "audioinput" && d.deviceId),
-        );
-      } catch {
-        // ignore
-      }
-    };
-    updateDevices();
-    navigator.mediaDevices.addEventListener?.("devicechange", updateDevices);
-    return () => {
-      navigator.mediaDevices.removeEventListener?.(
-        "devicechange",
-        updateDevices,
-      );
-    };
-  }, [enabled]);
-
-  // Open a *separate* mic stream just for the level meter. Browsers happily
-  // share the mic with the SDK so this doesn't conflict.
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    setErr(null);
 
-    (async () => {
+    const update = async () => {
       try {
-        const constraints: MediaStreamConstraints = {
-          audio:
-            selectedDevice === "default"
-              ? true
-              : { deviceId: { exact: selectedDevice } },
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-
-        const AudioCtor =
-          window.AudioContext ||
-          (
-            window as unknown as {
-              webkitAudioContext: typeof AudioContext;
-            }
-          ).webkitAudioContext;
-        const ctx = new AudioCtor();
-        audioCtxRef.current = ctx;
-        const source = ctx.createMediaStreamSource(stream);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 512;
-        source.connect(analyser);
-        const data = new Uint8Array(analyser.frequencyBinCount);
-
-        const tick = () => {
-          analyser.getByteTimeDomainData(data);
-          // RMS over the waveform → ~0..1 level
-          let sum = 0;
-          for (let i = 0; i < data.length; i++) {
-            const v = (data[i] - 128) / 128;
-            sum += v * v;
-          }
-          const rms = Math.sqrt(sum / data.length);
-          setLevel(Math.min(1, rms * 3));
-          rafRef.current = requestAnimationFrame(tick);
-        };
-        tick();
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        const list = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
+        setDevices(list.filter((d) => d.kind === "audioinput" && d.deviceId));
+      } catch {
+        // enumerateDevices can throw in some locked-down contexts — ignore
       }
-    })();
+    };
 
+    update();
+    navigator.mediaDevices.addEventListener?.("devicechange", update);
     return () => {
       cancelled = true;
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      audioCtxRef.current?.close().catch(() => {});
-      audioCtxRef.current = null;
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
+      navigator.mediaDevices.removeEventListener?.("devicechange", update);
     };
-  }, [enabled, selectedDevice]);
+  }, [enabled]);
 
-  const segments = 14;
-  const lit = Math.round(level * segments);
+  const hasLabels = devices.some((d) => d.label);
 
   return (
     <div className="w-full max-w-md flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-xs text-zinc-400">
-        <span className="shrink-0">Mic</span>
-        <div className="flex-1 flex gap-[2px]">
-          {Array.from({ length: segments }, (_, i) => {
-            const isLit = i < lit;
-            const colour =
-              i < 8
-                ? "bg-green-400"
-                : i < 11
-                  ? "bg-yellow-400"
-                  : "bg-red-400";
-            return (
-              <div
-                key={i}
-                className={`flex-1 h-2 rounded ${isLit ? colour : "bg-zinc-800"}`}
-              />
-            );
-          })}
-        </div>
-        <span className="shrink-0 tabular-nums w-8 text-right text-zinc-500">
-          {Math.round(level * 100)}
+      <div className="flex items-center gap-2 text-xs">
+        <span className="shrink-0 text-zinc-400">Microphone</span>
+        <span
+          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full ${
+            !enabled
+              ? "bg-zinc-800 text-zinc-500"
+              : isUserTalking
+                ? "bg-green-500/15 text-green-300"
+                : "bg-zinc-800 text-zinc-400"
+          }`}
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              !enabled
+                ? "bg-zinc-600"
+                : isUserTalking
+                  ? "bg-green-400 animate-pulse"
+                  : "bg-zinc-500"
+            }`}
+          />
+          {!enabled
+            ? "connecting…"
+            : isUserTalking
+              ? "hearing you…"
+              : "ready"}
         </span>
       </div>
-      {devices.length > 1 && (
-        <select
-          value={selectedDevice}
-          onChange={(e) => {
-            const id = e.target.value;
-            setSelectedDevice(id);
-            onDeviceChange?.(id);
-          }}
-          className="w-full text-xs rounded bg-zinc-900 border border-white/10 px-2 py-1 focus:outline-none focus:border-white/30"
-        >
-          <option value="default">Default microphone</option>
-          {devices.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
-              {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
-            </option>
-          ))}
-        </select>
-      )}
-      {err && (
-        <p className="text-xs text-red-300 bg-red-500/10 border border-red-500/20 px-2 py-1 rounded">
-          Mic level error: {err}
+
+      <select
+        value={selectedDevice}
+        disabled={!enabled || devices.length === 0}
+        onChange={(e) => {
+          const id = e.target.value;
+          setSelectedDevice(id);
+          if (id) onDeviceChange?.(id);
+        }}
+        className="w-full text-xs rounded bg-zinc-900 border border-white/10 px-2 py-1.5 focus:outline-none focus:border-white/30 disabled:opacity-50"
+      >
+        <option value="">System default microphone</option>
+        {devices.map((d, i) => (
+          <option key={d.deviceId} value={d.deviceId}>
+            {d.label || `Microphone ${i + 1}`}
+          </option>
+        ))}
+      </select>
+
+      {enabled && !hasLabels && (
+        <p className="text-[11px] text-zinc-500">
+          Microphone names appear once you&apos;ve allowed mic access in the
+          browser.
         </p>
       )}
     </div>

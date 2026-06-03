@@ -361,11 +361,14 @@ export function InterviewStage({
 
   const handleDeviceChange = useCallback((deviceId: string) => {
     const session = sessionRef.current;
-    if (!session) return;
+    if (!session || !deviceId) return;
     log("setDevice", deviceId);
+    // setDevice may return a Promise or sync — normalise and swallow errors so
+    // a failed switch can't crash the UI.
     try {
-      // SDK accepts a deviceId string (ConstrainDOMString)
-      void session.voiceChat.setDevice(deviceId);
+      Promise.resolve(
+        session.voiceChat.setDevice(deviceId) as unknown,
+      ).catch((err) => log("setDevice error", err));
     } catch (err) {
       log("setDevice error", err);
     }
@@ -559,6 +562,7 @@ export function InterviewStage({
 
         <MicDiagnostics
           enabled={voiceActive}
+          isUserTalking={isUserTalking}
           onDeviceChange={handleDeviceChange}
         />
 
@@ -586,10 +590,11 @@ export function InterviewStage({
           {isPTT ? (
             <>
               Hold the button (or <kbd className="px-1 rounded bg-white/10">space</kbd>)
-              while speaking; release to send. The mic meter should jump while
-              you talk. If <span className="text-zinc-300">user-spk</span> never
-              turns on, the SDK isn&apos;t getting your audio — try the
-              microphone selector above, or restart in Continuous Voice mode.
+              while speaking; release to send. The mic chip shows
+              &ldquo;hearing you&rdquo; while you talk. If{" "}
+              <span className="text-zinc-300">user-spk</span> never turns on,
+              the SDK isn&apos;t getting your audio — try a different
+              microphone above, or restart in Continuous Voice mode.
             </>
           ) : (
             <>
