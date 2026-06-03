@@ -4,7 +4,9 @@ import {
   type SttProvider,
   createContext,
   createSessionToken,
+  listAvatars,
   listContexts,
+  listVoices,
   updateContext,
 } from "@/lib/liveavatar-server";
 import {
@@ -60,10 +62,42 @@ export async function POST(req: Request) {
       );
     }
 
-    const voiceId =
+    // Voice resolution:
+    //   1. explicit voiceId from the request
+    //   2. LIVEAVATAR_VOICE_ID env var (pin a default precisely)
+    //   3. auto-resolve for IMAGE avatars (which REQUIRE a voice): the
+    //      avatar's paired default voice, else the first custom (private)
+    //      voice in the account — typically the one you bound (e.g. your
+    //      ElevenLabs clone). This is what makes "just press Start" work.
+    let voiceId =
       (sandbox ? undefined : body.voiceId) ||
       process.env.LIVEAVATAR_VOICE_ID ||
       undefined;
+    let voiceSource = voiceId ? "explicit" : "none";
+
+    if (!sandbox && !voiceId) {
+      try {
+        const avatars = await listAvatars();
+        const avatar = avatars.find((a) => a.id === avatarId);
+        // Only IMAGE avatars require a voice. Leave VIDEO avatars on their
+        // built-in voice unless one was explicitly chosen.
+        if (avatar?.type === "IMAGE") {
+          if (avatar.default_voice?.id) {
+            voiceId = avatar.default_voice.id;
+            voiceSource = "avatar default";
+          } else {
+            const priv = await listVoices("private");
+            if (priv.length > 0) {
+              voiceId = priv[0].id;
+              voiceSource = "first custom voice";
+            }
+          }
+        }
+      } catch {
+        // Lookup failed — leave undefined; LiveAvatar errors clearly if a
+        // voice is genuinely required.
+      }
+    }
 
     // Compose the effective prompt: the (possibly edited) persona prompt plus
     // a grounding block built from the panel roster + topic. This is what
@@ -149,6 +183,8 @@ export async function POST(req: Request) {
       updatedExistingContext,
       interactivityType: interactivity,
       sttProvider: sttProvider ?? null,
+      voiceId: voiceId ?? null,
+      voiceSource,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
